@@ -277,6 +277,11 @@ def update_portfolio_data(obj, user_name, client_code):
         print(
             f"Client {client_code} not found, creating new entry for the client."
         )
+        # Initialize the client entry if it doesn't exist
+        stocks_collection.insert_one({
+            "ClientCode": client_code,
+            "PortfolioStocks": []
+        })
 
     for stock in holdings_data:
         print(f"Processing stock: {stock['tradingsymbol']}")
@@ -303,52 +308,111 @@ def update_portfolio_data(obj, user_name, client_code):
 
         total_today_gain += today_gain
 
-        # Step 2: Always add or update today's entry for each stock
-        print(
-            f"Ensuring stock {stock['tradingsymbol']} has entry for {today_date}"
-        )
-        try:
-            stocks_collection.update_one(
+        # Step 2: Check if the stock exists in PortfolioStocks
+        stock_exists = stocks_collection.find_one({
+            "ClientCode": client_code,
+            "PortfolioStocks.stockName": stock['tradingsymbol']
+        })
+
+        if stock_exists:
+            # Step 2a: Try to update an existing entry for today's date
+            update_result = stocks_collection.update_one(
                 {
                     "ClientCode": client_code,
-                    "PortfolioStocks.stockName": stock['tradingsymbol']
+                    "PortfolioStocks.stockName": stock['tradingsymbol'],
+                    "PortfolioStocks.entries.date": today_date
                 },
                 {
-                    "$addToSet": {
-                        "PortfolioStocks.$.entries": {
-                            "date": today_date,
-                            "exchange": stock['exchange'],
-                            "quantity": stock['quantity'],
-                            "realisedquantity": stock['realisedquantity'],
-                            "authorisedquantity": stock['authorisedquantity'],
-                            "product": stock['product'],
-                            "averageprice": stock['averageprice'],
-                            "symboltoken": stock['symboltoken'],
-                            "overallPnL": stock['profitandloss'],
-                            "pnlpercentage": stock['pnlpercentage'],
-                            "todayGain": round(today_gain, 2)
-                        }
+                    "$set": {
+                        "PortfolioStocks.$.entries.$[entry].exchange": stock['exchange'],
+                        "PortfolioStocks.$.entries.$[entry].quantity": stock['quantity'],
+                        "PortfolioStocks.$.entries.$[entry].realisedquantity": stock['realisedquantity'],
+                        "PortfolioStocks.$.entries.$[entry].authorisedquantity": stock['authorisedquantity'],
+                        "PortfolioStocks.$.entries.$[entry].product": stock['product'],
+                        "PortfolioStocks.$.entries.$[entry].averageprice": stock['averageprice'],
+                        "PortfolioStocks.$.entries.$[entry].symboltoken": stock['symboltoken'],
+                        "PortfolioStocks.$.entries.$[entry].overallPnL": stock['profitandloss'],
+                        "PortfolioStocks.$.entries.$[entry].pnlpercentage": stock['pnlpercentage'],
+                        "PortfolioStocks.$.entries.$[entry].todayGain": round(today_gain, 2)
                     }
                 },
-                upsert=
-                True  # Ensure the stock entry is added if it doesn't exist
+                array_filters=[{"entry.date": today_date}]
             )
-            print(
-                f"Successfully added or updated stock {stock['tradingsymbol']} for {today_date}"
-            )
-        except Exception as e:
-            print(
-                f"Error adding or updating stock {stock['tradingsymbol']} for {today_date}: {e}"
-            )
+
+            if update_result.modified_count > 0:
+                print(
+                    f"Successfully updated existing entry for {stock['tradingsymbol']} on {today_date}"
+                )
+            else:
+                # Step 2b: If no existing entry for today, add a new one
+                stocks_collection.update_one(
+                    {
+                        "ClientCode": client_code,
+                        "PortfolioStocks.stockName": stock['tradingsymbol']
+                    },
+                    {
+                        "$push": {
+                            "PortfolioStocks.$.entries": {
+                                "date": today_date,
+                                "exchange": stock['exchange'],
+                                "quantity": stock['quantity'],
+                                "realisedquantity": stock['realisedquantity'],
+                                "authorisedquantity": stock['authorisedquantity'],
+                                "product": stock['product'],
+                                "averageprice": stock['averageprice'],
+                                "symboltoken": stock['symboltoken'],
+                                "overallPnL": stock['profitandloss'],
+                                "pnlpercentage": stock['pnlpercentage'],
+                                "todayGain": round(today_gain, 2)
+                            }
+                        }
+                    }
+                )
+                print(
+                    f"Successfully added new entry for {stock['tradingsymbol']} on {today_date}"
+                )
+        else:
+            # Step 3: If the stock does not exist, add it with today's entry
+            try:
+                stocks_collection.update_one(
+                    {"ClientCode": client_code},
+                    {
+                        "$push": {
+                            "PortfolioStocks": {
+                                "stockName": stock['tradingsymbol'],
+                                "entries": [{
+                                    "date": today_date,
+                                    "exchange": stock['exchange'],
+                                    "quantity": stock['quantity'],
+                                    "realisedquantity": stock['realisedquantity'],
+                                    "authorisedquantity": stock['authorisedquantity'],
+                                    "product": stock['product'],
+                                    "averageprice": stock['averageprice'],
+                                    "symboltoken": stock['symboltoken'],
+                                    "overallPnL": stock['profitandloss'],
+                                    "pnlpercentage": stock['pnlpercentage'],
+                                    "todayGain": round(today_gain, 2)
+                                }]
+                            }
+                        }
+                    }
+                )
+                print(
+                    f"Successfully added new stock {stock['tradingsymbol']} with entry for {today_date}"
+                )
+            except Exception as e:
+                print(
+                    f"Error adding new stock {stock['tradingsymbol']} for {today_date}: {e}"
+                )
 
     print(f"Total portfolio gain today for {user_name}: {total_today_gain}")
 
     # Update total portfolio as before
     portfolio_entry = portfolio_collection.find_one({
         "ClientCode":
-        client_code,
+            client_code,
         "Portfolio.date":
-        today_date
+            today_date
     })
 
     if portfolio_entry:
@@ -360,20 +424,21 @@ def update_portfolio_data(obj, user_name, client_code):
                 }, {
                     "$set": {
                         "Portfolio.$[elem].totalholdingvalue":
-                        round(total_portfolio_data['totalholdingvalue'], 2),
+                            round(total_portfolio_data['totalholdingvalue'], 2),
                         "Portfolio.$[elem].totalinvvalue":
-                        round(total_portfolio_data['totalinvvalue'], 2),
+                            round(total_portfolio_data['totalinvvalue'], 2),
                         "Portfolio.$[elem].totalprofitandloss":
-                        round(total_portfolio_data['totalprofitandloss'], 2),
+                            round(total_portfolio_data['totalprofitandloss'], 2),
                         "Portfolio.$[elem].totalpnlpercentage":
-                        total_portfolio_data['totalpnlpercentage'],
+                            total_portfolio_data['totalpnlpercentage'],
                         "Portfolio.$[elem].totalTodayGain":
-                        round(total_today_gain, 2)
+                            round(total_today_gain, 2)
                     }
                 },
                 array_filters=[{
                     "elem.date": today_date
-                }])
+                }]
+            )
             print(f"Successfully updated total portfolio for {today_date}.")
         except Exception as e:
             print(f"Error updating total portfolio for {today_date}: {e}")
@@ -383,17 +448,17 @@ def update_portfolio_data(obj, user_name, client_code):
                 "$push": {
                     "Portfolio": {
                         "date":
-                        today_date,
+                            today_date,
                         "totalholdingvalue":
-                        round(total_portfolio_data['totalholdingvalue'], 2),
+                            round(total_portfolio_data['totalholdingvalue'], 2),
                         "totalinvvalue":
-                        round(total_portfolio_data['totalinvvalue'], 2),
+                            round(total_portfolio_data['totalinvvalue'], 2),
                         "totalprofitandloss":
-                        round(total_portfolio_data['totalprofitandloss'], 2),
+                            round(total_portfolio_data['totalprofitandloss'], 2),
                         "totalpnlpercentage":
-                        total_portfolio_data['totalpnlpercentage'],
+                            total_portfolio_data['totalpnlpercentage'],
                         "totalTodayGain":
-                        round(total_today_gain, 2)
+                            round(total_today_gain, 2)
                     }
                 }
             },
