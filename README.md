@@ -4,6 +4,8 @@
 
 ![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white) ![MongoDB](https://img.shields.io/badge/MongoDB-47A248?style=flat-square&logo=mongodb&logoColor=white) ![Angel One SmartAPI](https://img.shields.io/badge/Angel%20One%20SmartAPI-E4572E?style=flat-square)
 
+**Related:** Live dashboard (demo data): [portfolio-tracker-frontend-2.vercel.app](https://portfolio-tracker-frontend-2.vercel.app)
+
 ## Features
 
 - Multi-client login with TOTP
